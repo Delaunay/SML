@@ -6,20 +6,20 @@ destination = 'C:/Users/Newton/work/satisfactory_mod/SatisfactoryModLoader/'
 
 
 def copy_sml_to_loader():
-    shutil.rmtree(os.path.join(destination, 'Source', 'SML'))
+    shutil.rmtree(os.path.join(destination, 'Source', 'SML'), ignore_errors=True)
     shutil.copytree(
         os.path.join(source, 'Source'),
         os.path.join(destination, 'Source', 'SML'))
 
 
 def copy_loader_to_sml():
-    shutil.rmtree(os.path.join(source, 'Source'))
+    shutil.rmtree(os.path.join(source, 'Source'), ignore_errors=True)
     # os.makedirs(os.path.join(source, 'Source'), exist_ok=True)
     shutil.copytree(
         os.path.join(destination, 'Source', 'SML'),
         os.path.join(source, 'Source'))
 
 
-# copy_sml_to_loader()
+copy_sml_to_loader()
 
-copy_loader_to_sml()
+# copy_loader_to_sml()
