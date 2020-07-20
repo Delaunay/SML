@@ -273,9 +273,9 @@ public:
         // Capture the pointer of the return value
         // so ScopeType does not have to know about that special case
         auto myTrampoline = [&](C* self_, A... args_) -> R {
-            functionPtr(self_, outReturnValue, args_...);
+            (reinterpret_cast<R*(*)(C*, R*, A...)>(functionPtr))(self_, outReturnValue, args_...);
             return *outReturnValue;
-        }
+        };
 
     	ScopeType scope(handlersBefore, myTrampoline);
     	scope(self, args...);
@@ -400,7 +400,6 @@ template <typename R, typename... A, R(*PMF)(A...)>
 R(* HookInvoker<R(*)(A...), PMF, None>::functionPtr)(A...) = nullptr;
 template <typename R, typename... A, R(*PMF)(A...)>
 bool HookInvoker<R(*)(A...), PMF, None>::bHookInitialized = false;
-
 
 #define SUBSCRIBE_METHOD(MethodReference, Handler) \
 HookInvoker<decltype(&MethodReference), &MethodReference, None>::InstallHook(#MethodReference); \

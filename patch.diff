@@ -1,0 +1,111 @@
+diff --git a/Source/mod/hooking.h b/Source/mod/hooking.h
+index 63ebe7b..23552d7 100644
+--- a/Source/mod/hooking.h
++++ b/Source/mod/hooking.h
+@@ -402,26 +401,53 @@ template <typename R, typename... A, R(*PMF)(A...)>
+ bool HookInvoker<R(*)(A...), PMF, None>::bHookInitialized = false;
+ 
+ 
++// std::remove_const does not work for methods so we build our own
++template <typename TCallable, TCallable Callable>
++struct ConstMethodEraser;
++
++template <typename R, typename... A, R(*PMF)(A...)>
++struct ConstMethodEraser<R(*)(A...), PMF> {
++    typedef typename R(*Type)(A...);
++};
++
++template <typename R, typename C, typename... A, R(C::*PMF)(A...)>
++struct ConstMethodEraser<R(C::*)(A...), PMF> {
++    typedef typename R(C::*Type)(A...);
++};
++
++// Move const from the method to the object
++template <typename R, typename C, typename... A, R(C::*PMF)(A...) const>
++struct ConstMethodEraser<R(C::*)(A...) const, PMF> {
++    typedef typename R(C::*Type)(A...);
++};
++
++#define DECLTYPE_CONST_ERASED(MethodReference)\
++    ConstMethodEraser<decltype(MethodReference), MethodReference>::Type
++
++// We need to cast the method as if it was not const qualified
++#define ERASE_CONST(MethodReference)\
++    ((DECLTYPE_CONST_ERASED(MethodReference))(MethodReference))
++
+ #define SUBSCRIBE_METHOD(MethodReference, Handler) \
+-HookInvoker<decltype(&MethodReference), &MethodReference, None>::InstallHook(#MethodReference); \
+-HookInvoker<decltype(&MethodReference), &MethodReference, None>::addHandlerBefore(Handler);
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), None>::InstallHook(#MethodReference); \
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), None>::addHandlerBefore(Handler);
+ 
+ #define SUBSCRIBE_METHOD_AFTER(MethodReference, Handler) \
+-HookInvoker<decltype(&MethodReference), &MethodReference, None>::InstallHook(#MethodReference); \
+-HookInvoker<decltype(&MethodReference), &MethodReference, None>::addHandlerAfter(Handler);
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), None>::InstallHook(#MethodReference); \
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), None>::addHandlerAfter(Handler);
+ 
+ #define SUBSCRIBE_VIRTUAL_FUNCTION(TargetClass, MethodReference, Handler) \
+-HookInvoker<decltype(&MethodReference), &MethodReference, TargetClass>::InstallVirtualFunctionHook<RetargetFuncType<decltype(&MethodReference), TargetClass>::Value>(#MethodReference, &MethodReference); \
+-HookInvoker<decltype(&MethodReference), &MethodReference, TargetClass>::addHandlerBefore(Handler);
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), TargetClass>::InstallVirtualFunctionHook<RetargetFuncType<decltype(&MethodReference), TargetClass>::Value>(#MethodReference, &MethodReference); \
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), TargetClass>::addHandlerBefore(Handler);
+ 
+ #define SUBSCRIBE_VIRTUAL_FUNCTION_AFTER(TargetClass, MethodReference, Handler) \
+-HookInvoker<decltype(&MethodReference), &MethodReference, TargetClass>::InstallVirtualFunctionHook<RetargetFuncType<decltype(&MethodReference), TargetClass>::Value>(#MethodReference, &MethodReference); \
+-HookInvoker<decltype(&MethodReference), &MethodReference, TargetClass>::addHandlerAfter(Handler);
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), TargetClass>::InstallVirtualFunctionHook<RetargetFuncType<decltype(&MethodReference), TargetClass>::Value>(#MethodReference, &MethodReference); \
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), TargetClass>::addHandlerAfter(Handler);
+ 
+ #define SUBSCRIBE_METHOD_MANUAL(MethodName, MethodReference, Handler) \
+-HookInvoker<decltype(&MethodReference), &MethodReference, None>::InstallHook(MethodName); \
+-HookInvoker<decltype(&MethodReference), &MethodReference, None>::addHandlerBefore(Handler);
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), None>::InstallHook(MethodName); \
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), None>::addHandlerBefore(Handler);
+ 
+ #define SUBSCRIBE_METHOD_AFTER_MANUAL(MethodName, MethodReference, Handler) \
+-HookInvoker<decltype(&MethodReference), &MethodReference, None>::InstallHook(MethodName); \
+-HookInvoker<decltype(&MethodReference), &MethodReference, None>::addHandlerAfter(Handler);
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), None>::InstallHook(MethodName); \
++HookInvoker<DECLTYPE_CONST_ERASED(&MethodReference), ERASE_CONST(&MethodReference), None>::addHandlerAfter(Handler);
+diff --git a/Source/player/OfflinePlayHandler.cpp b/Source/player/OfflinePlayHandler.cpp
+index ca15a08..06492e5 100644
+--- a/Source/player/OfflinePlayHandler.cpp
++++ b/Source/player/OfflinePlayHandler.cpp
+@@ -14,22 +14,25 @@ extern void GRegisterOfflinePlayHandler() {
+     FParse::Value(FCommandLine::Get(), TEXT("-Username="), UsernameOverride);
+     if (!UsernameOverride.IsEmpty()) {
+         SML::Logging::info(TEXT("Offline Username Override: "), *UsernameOverride);
+-        SUBSCRIBE_METHOD_MANUAL("ULocalPlayer::GetNickname", IFuckingHateConstMethods::ShittyMethod, [=](auto& Call, auto* Player, FString* OutReturnValue) {
+-            FString* ReturnedParentValue = Call(Player, OutReturnValue);
+-            if (ReturnedParentValue->IsEmpty()) {
++
++        SUBSCRIBE_METHOD(ULocalPlayer::GetNickname, [&](auto& Call, auto* Player) {
++            FString ReturnedParentValue = Call(Player);
++
++            if (ReturnedParentValue.IsEmpty()) {
+                 SML::Logging::info(TEXT("Online Subsystem Nickname not provided, falling back to -Username"));
+-                *OutReturnValue = UsernameOverride;
+-                Call.Override(OutReturnValue);
++                Call.Override(UsernameOverride);
+             }
+-            SML::Logging::info(TEXT("Parent GetNickname: "), **ReturnedParentValue);
++            SML::Logging::info(TEXT("Parent GetNickname: "), *ReturnedParentValue);
+         });
+-        SUBSCRIBE_METHOD_MANUAL("ULocalPlayer::GetUniqueNetIdFromCachedControllerId", IFuckingHateConstMethods::ShittyMethod2, [=](auto& Call, auto* Player, FUniqueNetIdRepl* OutReturnValue) {
+-            FUniqueNetIdRepl* ReturnedParentValue = Call(Player, OutReturnValue);
+-            if (!ReturnedParentValue->IsValid()) {
++
++        // FUniqueNetIdRepl GetUniqueNetIdFromCachedControllerId() const;
++        SUBSCRIBE_METHOD(ULocalPlayer::GetUniqueNetIdFromCachedControllerId, [=](auto& Call, auto* Player) {
++            FUniqueNetIdRepl ReturnedParentValue = Call(Player);
++
++            if (!ReturnedParentValue.IsValid()) {
+                 SML::Logging::info(TEXT("Online Subsystem UniqueNotId not provided, falling back to -Username-generated UniqueId"));
+                 const TSharedPtr<const FUniqueNetId> UniqueNetIdPtr = UOnlineEngineInterface::Get()->CreateUniquePlayerId(UsernameOverride);
+-                *OutReturnValue = FUniqueNetIdRepl(UniqueNetIdPtr);
+-                Call.Override(OutReturnValue);
++                Call.Override(FUniqueNetIdRepl(UniqueNetIdPtr));
+             }
+         });
+     }
